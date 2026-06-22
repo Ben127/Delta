@@ -52,13 +52,17 @@ jobs:
         run: swift build -v
 
       # 第一步：编译 Systems 依赖，完全禁用签名
-      - name: Build Systems (No Signing)
+      - name: Build Systems (No Signing, fix Package.swift error)
         run: |
+          pwd
           cd Systems
+          pwd
+          ls -la
           xcodebuild build \
             -workspace Systems.xcworkspace \
             -scheme Systems \
             -configuration Release \
+            -arch arm64 \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
