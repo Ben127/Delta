@@ -48,8 +48,7 @@ jobs:
           
           echo "=== CocoaPods ==="
           pod --version
-      - name: Build swift
-        run: swift build -v
+      
 
       # 第一步：编译 Systems 依赖，完全禁用签名
       - name: Build Systems (No Signing, fix Package.swift error)
@@ -66,6 +65,9 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Build swift
+        run: swift build -v
 
       # 第二步：归档 Delta 主项目，关闭所有签名
       - name: Archive Delta (Unsigned xcarchive)
