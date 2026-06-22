@@ -1,0 +1,93 @@
+name: Build Delta Unsigned IPA (No Cert)
+run-name: Build unsigned Delta ${{ github.sha }}
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # 手动运行按钮
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          submodules: recursive
+
+      - name: Git LFS pull large assets
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # 第一步：编译 Systems 依赖，完全禁用签名
+      - name: Build Systems (No Signing)
+        run: |
+          cd Systems
+          xcodebuild build \
+            -workspace Systems.xcworkspace \
+            -scheme Systems \
+            -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      # 第二步：归档 Delta 主项目，关闭所有签名
+      - name: Archive Delta (Unsigned xcarchive)
+        run: |
+          xcodebuild archive \
+            -workspace Delta.xcworkspace \
+            -scheme Delta \
+            -configuration Release \
+            -archivePath ${RUNNER_TEMP}/Delta-Unsigned.xcarchive \
+            -destination generic/platform=iOS \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=""
+
+      # 第三步：导出未签名 IPA
+      - name: Generate ExportOptions for unsigned
+        run: |
+          cat > ${RUNNER_TEMP}/ExportOptionsUnsigned.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>none</string>
+            <key>provisioningProfiles</key>
+            <dict/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export Unsigned IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath ${RUNNER_TEMP}/Delta-Unsigned.xcarchive \
+            -exportPath ${RUNNER_TEMP}/Output \
+            -exportOptionsPlist ${RUNNER_TEMP}/ExportOptionsUnsigned.plist
+
+      # 上传产物：未签名IPA + xcarchive
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Delta-Unsigned-Build
+          path: |
+            ${{ runner.temp }}/Output/*.ipa
+            ${{ runner.temp }}/Delta-Unsigned.xcarchive
+          retention-days: 30
