@@ -1,57 +1,42 @@
-name: Build Delta Unsigned IPA (No Cert)
+name: Build Delta (Xcode15 / Swift5.9 / iOS14, Unsigned IPA)
 run-name: Build unsigned Delta ${{ github.sha }}
-
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # 手动运行按钮
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: macos-latest
     timeout-minutes: 45
+    env:
+      # 强制 Swift 5.9 编译模式，规避 SwiftDriver 异常
+      SWIFT_VERSION: 5.9
+      SWIFT_USE_SWIFTDRIVER: NO
+      IPHONEOS_DEPLOYMENT_TARGET: 14.0
+
     steps:
-      - name: Checkout code
+      - name: Checkout full source + LFS + submodules
         uses: actions/checkout@v4
         with:
           lfs: true
           submodules: recursive
+          fetch-depth: 0
 
-      - name: Git LFS pull large assets
+      - name: Repair Git LFS
         run: |
           git lfs install
-          git lfs pull
+          git lfs fetch --all
+          git lfs checkout
 
-      - name: Select latest Xcode
+      # 锁定 Xcode 15（满足项目最低要求 Xcode15）
+      - name: Select Xcode 15
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "15.0"
 
-      #检查版本
-      - name: Check full build environment
-        run: |
-          echo "=== System ==="
-          sw_vers
-          
-          echo "=== Xcode ==="
-          xcodebuild -version
-          echo "Path: $(xcode-select -p)"
-          
-          echo "=== Available Xcodes ==="
-          ls -la /Applications/ | grep -i xcode
-          
-          echo "=== iOS SDKs ==="
-          xcodebuild -showsdks | grep -E "ios|iphoneos"
-          
-          echo "=== Swift version ==="
-          swift --version
-          
-          echo "=== CocoaPods ==="
-          pod --version
-      
-
-      # 第一步：编译 Systems 依赖，完全禁用签名
-      - name: Build Systems (No Signing, fix Package.swift error)
+      # 编译 Systems 子工程（必须带 -workspace 杜绝 Package.swift 报错）
+      - name: Build Systems workspace (iOS14 arm64 no sign)
         run: |
           pwd
           cd Systems
@@ -62,14 +47,13 @@ jobs:
             -scheme Systems \
             -configuration Release \
             -arch arm64 \
+            IPHONEOS_DEPLOYMENT_TARGET=14.0 \
+            SWIFT_VERSION=5.9 \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Build swift
-        run: swift build -v
-
-      # 第二步：归档 Delta 主项目，关闭所有签名
+      # 归档主项目 Delta，最低部署 iOS14、Swift5.9、仅arm64、无签名
       - name: Archive Delta (Unsigned xcarchive)
         run: |
           xcodebuild archive \
@@ -78,13 +62,16 @@ jobs:
             -configuration Release \
             -archivePath ${RUNNER_TEMP}/Delta-Unsigned.xcarchive \
             -destination generic/platform=iOS \
+            -arch arm64 \
+            IPHONEOS_DEPLOYMENT_TARGET=14.0 \
+            SWIFT_VERSION=5.9 \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM=""
 
-      # 第三步：导出未签名 IPA
-      - name: Generate ExportOptions for unsigned
+      # 导出配置：无证书、不签名
+      - name: Generate unsigned ExportOptions.plist
         run: |
           cat > ${RUNNER_TEMP}/ExportOptionsUnsigned.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -101,6 +88,8 @@ jobs:
             <dict/>
             <key>compileBitcode</key>
             <false/>
+            <key>minimumSystemVersion</key>
+            <string>14.0</string>
           </dict>
           </plist>
           EOF
@@ -112,11 +101,10 @@ jobs:
             -exportPath ${RUNNER_TEMP}/Output \
             -exportOptionsPlist ${RUNNER_TEMP}/ExportOptionsUnsigned.plist
 
-      # 上传产物：未签名IPA + xcarchive
-      - name: Upload Artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Delta-Unsigned-Build
+          name: Delta-iOS14-Xcode15-Unsigned-IPA
           path: |
             ${{ runner.temp }}/Output/*.ipa
             ${{ runner.temp }}/Delta-Unsigned.xcarchive
