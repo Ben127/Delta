@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - name: Checkout code
@@ -26,6 +26,30 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      #检查版本
+      - name: Check full build environment
+        run: |
+          echo "=== System ==="
+          sw_vers
+          
+          echo "=== Xcode ==="
+          xcodebuild -version
+          echo "Path: $(xcode-select -p)"
+          
+          echo "=== Available Xcodes ==="
+          ls -la /Applications/ | grep -i xcode
+          
+          echo "=== iOS SDKs ==="
+          xcodebuild -showsdks | grep -E "ios|iphoneos"
+          
+          echo "=== Swift version ==="
+          swift --version
+          
+          echo "=== CocoaPods ==="
+          pod --version
+      - name: Build swift
+        run: swift build -v
 
       # 第一步：编译 Systems 依赖，完全禁用签名
       - name: Build Systems (No Signing)
