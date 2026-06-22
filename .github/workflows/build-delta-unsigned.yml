@@ -1,5 +1,5 @@
-name: Build Delta (Xcode15 / Swift5.9 / iOS14, Unsigned IPA)
-run-name: Build unsigned Delta ${{ github.sha }}
+name: Build Delta (Xcode15 | Swift5.9 | iOS14 | Unsigned)
+run-name: Delta Auto Build Unsigned IPA
 on:
   push:
     branches: [ main ]
@@ -10,38 +10,34 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     env:
-      # 强制 Swift 5.9 编译模式，规避 SwiftDriver 异常
       SWIFT_VERSION: 5.9
       SWIFT_USE_SWIFTDRIVER: NO
       IPHONEOS_DEPLOYMENT_TARGET: 14.0
 
     steps:
-      - name: Checkout full source + LFS + submodules
+      - name: Checkout source + LFS + submodules
         uses: actions/checkout@v4
         with:
           lfs: true
           submodules: recursive
           fetch-depth: 0
 
-      - name: Repair Git LFS
+      - name: Fix & pull Git LFS assets
         run: |
           git lfs install
+          git lfs prune
           git lfs fetch --all
           git lfs checkout
 
-      # 锁定 Xcode 15（满足项目最低要求 Xcode15）
-      - name: Select Xcode 15
+      - name: Pin Xcode 15.0
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "15.0"
 
-      # 编译 Systems 子工程（必须带 -workspace 杜绝 Package.swift 报错）
-      - name: Build Systems workspace (iOS14 arm64 no sign)
+      # 第一步：编译 Systems 子工程（官方要求先编译Systems）
+      - name: Build Systems workspace
         run: |
-          pwd
           cd Systems
-          pwd
-          ls -la
           xcodebuild build \
             -workspace Systems.xcworkspace \
             -scheme Systems \
@@ -53,14 +49,14 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      # 归档主项目 Delta，最低部署 iOS14、Swift5.9、仅arm64、无签名
+      # 第二步：归档 Delta 主项目
       - name: Archive Delta (Unsigned xcarchive)
         run: |
           xcodebuild archive \
             -workspace Delta.xcworkspace \
             -scheme Delta \
             -configuration Release \
-            -archivePath ${RUNNER_TEMP}/Delta-Unsigned.xcarchive \
+            -archivePath ${RUNNER_TEMP}/Delta.xcarchive \
             -destination generic/platform=iOS \
             -arch arm64 \
             IPHONEOS_DEPLOYMENT_TARGET=14.0 \
@@ -70,10 +66,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM=""
 
-      # 导出配置：无证书、不签名
-      - name: Generate unsigned ExportOptions.plist
+      # 无签名导出配置
+      - name: Create ExportOptions.plist
         run: |
-          cat > ${RUNNER_TEMP}/ExportOptionsUnsigned.plist <<EOF
+          cat > ${RUNNER_TEMP}/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -94,18 +90,18 @@ jobs:
           </plist>
           EOF
 
-      - name: Export Unsigned IPA
+      - name: Export unsigned IPA
         run: |
           xcodebuild -exportArchive \
-            -archivePath ${RUNNER_TEMP}/Delta-Unsigned.xcarchive \
+            -archivePath ${RUNNER_TEMP}/Delta.xcarchive \
             -exportPath ${RUNNER_TEMP}/Output \
-            -exportOptionsPlist ${RUNNER_TEMP}/ExportOptionsUnsigned.plist
+            -exportOptionsPlist ${RUNNER_TEMP}/ExportOptions.plist
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Delta-iOS14-Xcode15-Unsigned-IPA
+          name: Delta-iOS14-Unsigned-IPA
           path: |
             ${{ runner.temp }}/Output/*.ipa
-            ${{ runner.temp }}/Delta-Unsigned.xcarchive
+            ${{ runner.temp }}/Delta.xcarchive
           retention-days: 30
